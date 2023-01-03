@@ -1,23 +1,15 @@
-use chrono::{DateTime, Utc};
 use elasticsearch::{
-    http::transport::Transport, CountParts, Elasticsearch, IndexParts, SearchParts,
+    http::{transport::Transport, StatusCode},
+    indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
+    BulkOperation, BulkParts, CountParts, Elasticsearch, IndexParts, SearchParts,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::Path;
+use tokio::time::Instant;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct User(String);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Message(String);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Tweet {
-    id: u64,
-    user: User,
-    post_date: DateTime<Utc>,
-    message: Message,
-}
+mod tweet;
+use tweet::*;
 
 const TWEETS_INDEX: &str = "tweets";
 
@@ -56,7 +48,64 @@ enum IndexResult {
     Updated,
 }
 
+/// Creates index "tweets". If the index exists, it deletes the previous data.
+async fn create_index_if_not_exists(client: &Elasticsearch, delete: bool) -> anyhow::Result<()> {
+    let exists = client
+        .indices()
+        .exists(IndicesExistsParts::Index(&[TWEETS_INDEX]))
+        .send()
+        .await?;
+
+    if exists.status_code().is_success() && delete {
+        let delete = client
+            .indices()
+            .delete(IndicesDeleteParts::Index(&[TWEETS_INDEX]))
+            .send()
+            .await?;
+
+        if !delete.status_code().is_success() {
+            println!("Problem deleting index: {}", delete.text().await?);
+        }
+    }
+
+    if exists.status_code() == StatusCode::NOT_FOUND || delete {
+        let response = client
+            .indices()
+            .create(IndicesCreateParts::Index(TWEETS_INDEX))
+            .body(json!({
+                "mappings": {
+                    "properties": {
+                        "user": { "type": "keyword" },
+                        "date": { "type": "date" },
+                        "message": { "type": "text" },
+                    }
+                }
+            }))
+            .send()
+            .await?;
+
+        if !response.status_code().is_success() {
+            println!("Error while creating index");
+        }
+    }
+
+    Ok(())
+}
+
 /// Inserts or updates the given tweet
+///
+/// ```rust, ignore
+/// let tweet = Tweet {
+///     id: 1,
+///     user: User("Arnau".to_string()),
+///     date: Utc::now(),
+///     message: Message("This is an example".to_string()),
+/// };
+/// let tweet_id = tweet.id;
+/// let index_result = index_tweet(&client, tweet).await?;
+/// println!("Tweet {} {}", tweet_id, index_result);
+/// ```
+#[allow(dead_code)]
 async fn index_tweet(client: &Elasticsearch, tweet: Tweet) -> anyhow::Result<IndexResult> {
     let response = client
         .index(IndexParts::IndexId(TWEETS_INDEX, &tweet.id.to_string()))
@@ -113,19 +162,53 @@ async fn search_tweet_by_message(
     Ok(tweets)
 }
 
+async fn load_tweets<P: AsRef<Path>>(client: &Elasticsearch, path: P) -> anyhow::Result<()> {
+    let tweets: Vec<Tweet> = read_tweets(path).await?;
+
+    let body: Vec<BulkOperation<_>> = tweets
+        .iter()
+        .map(|tweet| {
+            let id = tweet.id.to_string();
+            BulkOperation::index(tweet).id(&id).into()
+        })
+        .collect();
+
+    let start_time = Instant::now();
+    let response = client
+        .bulk(BulkParts::Index(TWEETS_INDEX))
+        .body(body)
+        .send()
+        .await?;
+    println!(
+        "Indexed {} tweets in {} seconds",
+        tweets.len(),
+        start_time.elapsed().as_secs()
+    );
+
+    let json: Value = response.json().await?;
+    if json["errors"].as_bool().unwrap() {
+        let failed: Vec<&Value> = json["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| !v["error"].is_null())
+            .collect();
+
+        // TODO: retry failures
+        println!("Errors whilst indexing. Failures: {}", failed.len());
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = get_client().await?;
 
-    let tweet = Tweet {
-        id: 1,
-        user: User("Arnau".to_string()),
-        post_date: Utc::now(),
-        message: Message("This is an example".to_string()),
-    };
-    let tweet_id = tweet.id;
-    let index_result = index_tweet(&client, tweet).await?;
-    println!("Tweet {} was {}", tweet_id, index_result);
+    create_index_if_not_exists(&client, true).await?;
+
+    let tweets_filepath: &Path = Path::new("./tweets.json");
+    load_tweets(&client, tweets_filepath).await?;
 
     let count = count_tweets(&client).await?;
     println!("Number of tweets indexed: {}", count);
