@@ -1,14 +1,19 @@
 # Elasticsearch in Action
 
-This project is a playground for Elasticsearch apps written in Rust.
-
-## Development
-
-The following environments are provided:
+Start your single node elasticsearch server:
 
 ```bash
-# Start
-docker-compose -f docker/simple.yaml up -d
-# Stop
-docker-compose -f docker/simple.yaml down
+docker-compose -f docker/simple.yaml up
+  ```
+
+Index a [collection of tweets](./tweets.json):
+
+```bash
+cargo run --bin index
+  ```
+
+Search by word:
+
+```bash
+cargo run --bin search -- --word=ipsum
   ```
