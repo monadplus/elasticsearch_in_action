@@ -50,6 +50,10 @@ pub enum IndexResult {
 }
 
 /// Creates index "tweets". If the index exists, it deletes the previous data.
+///
+/// ```sh, ignore
+/// curl -X GET "localhost:9200/tweets?pretty
+/// ```ignore
 pub async fn create_index_if_not_exists(
     client: &Elasticsearch,
     delete: bool,
@@ -77,6 +81,12 @@ pub async fn create_index_if_not_exists(
             .indices()
             .create(IndicesCreateParts::Index(TWEETS_INDEX))
             .body(json!({
+                "settings" : {
+                    "index" : {
+                        "number_of_shards" : 3,
+                        "number_of_replicas" : 1,
+                    }
+                },
                 "mappings": {
                     "properties": {
                         "user": { "type": "keyword" },
