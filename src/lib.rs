@@ -1,5 +1,9 @@
 use elasticsearch::{
-    http::{transport::Transport, StatusCode},
+    auth::Credentials,
+    http::{
+        transport::{SingleNodeConnectionPool, TransportBuilder},
+        StatusCode, Url,
+    },
     indices::{IndicesCreateParts, IndicesDeleteParts, IndicesExistsParts},
     params::VersionType,
     BulkOperation, BulkParts, CountParts, Elasticsearch, IndexParts, SearchParts,
@@ -12,10 +16,17 @@ use tokio::time::Instant;
 mod tweet;
 use tweet::*;
 
+pub const ELASTICSEARCH_URL: &str = "http://localhost:9200";
+pub const USER: &str = "test";
+pub const PASSWORD: &str = "test";
 pub const TWEETS_INDEX: &str = "tweets";
 
-pub async fn get_client() -> anyhow::Result<Elasticsearch> {
-    let transport = Transport::single_node("http://localhost:9200")?;
+// TODO: authenticate Elasticsearch in dockerfiles
+pub async fn get_basic_auth_client() -> anyhow::Result<Elasticsearch> {
+    let url = Url::parse(ELASTICSEARCH_URL)?;
+    let conn_pool = SingleNodeConnectionPool::new(url);
+    let credentials = Credentials::Basic(USER.into(), PASSWORD.into());
+    let transport = TransportBuilder::new(conn_pool).auth(credentials).build()?;
     let client = Elasticsearch::new(transport);
     Ok(client)
 }

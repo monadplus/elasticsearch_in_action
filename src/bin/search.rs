@@ -13,7 +13,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let client = get_client().await?;
+    let client = get_basic_auth_client().await?;
     let tweets = search_tweet_by_message(&client, &args.word, 10).await?;
     println!(
         r#"Tweets containing the word "{}": {}"#,

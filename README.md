@@ -8,6 +8,7 @@ Start a local elasticsearch server (single node or cluster):
 # Option 1
 docker-compose -f docker/single_node_with_kibana.yaml up
 # Option 2 (recommended)
+sudo sysctl -w vm.max_map_count=262144
 docker-compose -f docker/cluster_with_kibana.yaml up
 ```
 
