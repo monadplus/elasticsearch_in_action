@@ -158,7 +158,7 @@ where
 /// Search all tweets containing the given word
 ///
 /// ```bash
-/// curl -H "Content-Type: application/json" -XGET 'http://localhost:9200/tweets/_search?pretty' -d '{"query": {"match": {"message": "example"}}}'
+/// curl -H "Content-Type: application/json" -XGET 'http://localhost:9200/tweets/_search?pretty' -d '{"query": {"match": {"message": "est"}}}'
 /// ```
 pub async fn search_tweet_by_message(
     client: &Elasticsearch,
@@ -176,6 +176,35 @@ pub async fn search_tweet_by_message(
                         "query": message,
                         "operator": "or"
                     }
+                }
+            }
+        }))
+        .send()
+        .await?
+        .error_for_status_code()?;
+    let response_body: Value = response.json().await?;
+    let tweets = deserialize_hits::<Tweet>(&response_body);
+    Ok(tweets)
+}
+
+pub async fn search_filtered(client: &Elasticsearch) -> anyhow::Result<Vec<Tweet>> {
+    let response = client
+        .search(SearchParts::Index(&[TWEETS_INDEX]))
+        .from(0)
+        .size(100)
+        .body(json!({
+            "query": {
+                "bool": {
+                    "must": [
+                      {"match": {"message": "est"}}
+                    ],
+                    "should": [
+                      {"match": {"message": "ipsum"}}
+                    ],
+                    "filter": [
+                      {"terms": {"user": ["Rose", "Trina"]}},
+                      {"range": {"date": {"gte": "2022-05-01", "lte": "now"}}}
+                    ]
                 }
             }
         }))
